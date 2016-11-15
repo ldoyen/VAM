@@ -19,11 +19,11 @@ VamModel::~VamModel() {
 	delete[] d2Vleft;
 	delete[] dA;
 	delete[] d2A;
-	delete[] B;
-	delete[] dB;
-	delete[] d2B;
-	delete[] dC;
-	delete[] d2C;
+	if(mu>0){
+		delete[] VR_prec;
+		delete[] dVR_prec;
+		delete[] d2VR_prec;
+	}
 	delete models;
 	delete family;
 	delete maintenance_policy;
@@ -153,16 +153,16 @@ void VamModel::set_maintenance_policy(List maintenance_policy_) {
 };
 
 void VamModel::init_computation_values() {
+	int i;
 	S1=0;S2=0;S0=0;S3=0;
 	Vleft=0;Vright=0;
 	hVleft=0;
 	A=1;
-	C=0;
-	for(int i=0;i<nbPM + 1;i++) models->at(i)->init();
+	for(i=0;i<nbPM + 1;i++) models->at(i)->init();
 }
 
 void VamModel::init(List model_) {
-	max_mem=model_["max_memory"];
+	mu=model_["max_memory"];mu--;
 	List models_=model_["models"];
 	List family_=model_["family"];
 	List maintenance_policy_=model_["pm.policy"];
@@ -193,22 +193,21 @@ void VamModel::init(List model_) {
 	d2Vleft=new double[(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2];//inferior diagonal part of the hessian matrice by lines
 	dA=new double[nb_paramsMaintenance];
 	d2A=new double[(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2];//inferior diagonal part of the hessian matrice by lines
-	dC=new double[nb_paramsMaintenance];
-	d2C=new double[(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2];//inferior diagonal part of the hessian matrice by lines
-	B=new double[max_mem];
-	dB=new double[max_mem*nb_paramsMaintenance];//dB[i*nb_paramsMaintenance+j] for 0<=i<max_mem and 0<=j<nb_paramsMaintenance, corresponds to the j th partial derivative corresponding to the i th last inter-maintenance time effect
-	d2B=new double[max_mem*(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2];//d2B[i*(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2+j] for 0<=i<max_mem and 0<=j<(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2, inferior diagonal part of the hessian matrice by lines
-	//DEBUG: printf("dVright:%p,dVleft:%p\n",dVright,dVleft);
+	if(mu>0){
+		VR_prec=new double[mu];
+		dVR_prec=new double[mu*nb_paramsMaintenance];//dVR_prec[i*nb_paramsMaintenance+j] for 0<=i<mu and 0<=j<nb_paramsMaintenance, corresponds to the j th partial derivative corresponding to the i th last inter-maintenance time effect
+		d2VR_prec=new double[mu*(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2];//d2VR_prec[i*(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2+j] for 0<=i<mu and 0<=j<(nb_paramsMaintenance)*(nb_paramsMaintenance+1)/2, inferior diagonal part of the hessian matrice by lines
+	}
 };
 
 void VamModel::init_virtual_age_infos() {
+		int i;
     	k=0;
     	idMod=0; //id of current model
     	S1 = 0;
     	Vright=0;
     	A=1;
-    	C=0;
-    	for(int i=0;i<nbPM + 1;i++) models->at(i)->init();
+    	for(i=0;i<nbPM + 1;i++) models->at(i)->init();
 };
 
 DataFrame VamModel::get_virtual_age_info(double from,double to, double by) {
@@ -226,22 +225,22 @@ DataFrame VamModel::get_virtual_age_info(double from,double to, double by) {
 
 	t[0]=from;t[n]=to;
 	v[0]=virtual_age(from);v[n]=virtual_age(to);
-	h[0]=family->hazardRate(v[0]);h[n]=family->hazardRate(v[n]);
+	h[0]=A*family->hazardRate(v[0]);h[n]=A*family->hazardRate(v[n]);
 	H[0]=S1;H[n]=S1+family->cumulative_hazardRate(v[n])-family->cumulative_hazardRate(v[0]);
 	F[0]=0;F[n]=1-exp(-(family->cumulative_hazardRate(v[n])-family->cumulative_hazardRate(v[0])));
 	S[0]=1;S[n]=exp(-(family->cumulative_hazardRate(v[n])-family->cumulative_hazardRate(v[0])));
-	f[0]=family->hazardRate(v[0]);f[n]=family->hazardRate(v[n])*exp(-(family->cumulative_hazardRate(v[n])-family->cumulative_hazardRate(v[0])));
+	f[0]=A*family->hazardRate(v[0]);f[n]=A*family->hazardRate(v[n])*exp(-(family->cumulative_hazardRate(v[n])-family->cumulative_hazardRate(v[0])));
 	double by_t=(t[n]-t[0])/s;
 	double by_v=(v[n]-v[0])/s;
 
 	for(int i=1;i<n;i++) {
 		t[i]=t[i-1]+by_t;//printf("t[%d]=%lf\n",i,t[i]);
 		v[i]=v[i-1]+by_v;
-		h[i]=family->hazardRate(v[i]);
+		h[i]=A*family->hazardRate(v[i]);
 		H[i]=S1+family->cumulative_hazardRate(v[i])-family->cumulative_hazardRate(v[0]);
 		F[i]=1-exp(-(family->cumulative_hazardRate(v[i])-family->cumulative_hazardRate(v[0])));
 		S[i]=exp(-(family->cumulative_hazardRate(v[i])-family->cumulative_hazardRate(v[0])));
-		f[i]=family->hazardRate(v[i])*exp(-(family->cumulative_hazardRate(v[i])-family->cumulative_hazardRate(v[0])));
+		f[i]=A*family->hazardRate(v[i])*exp(-(family->cumulative_hazardRate(v[i])-family->cumulative_hazardRate(v[0])));
 	}
 
 	return DataFrame::create(
